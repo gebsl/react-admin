@@ -33,6 +33,20 @@ import { fetchUtils, DataProvider } from 'ra-core';
  *
  * export default App;
  */
+
+ // Id function is necessary, as React Admin always expects a property named "id"
+ function idFuncSingle(json: any) {
+    json.id = json.Id;
+    return json;
+ }
+
+function idFunc(json: any) {
+    if (Array.isArray(json))
+        return json.map((item) => idFuncSingle(item));
+    else
+        return idFuncSingle(json);
+}
+
 export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
     getList: (resource, params) => {
         const { page, perPage } = params.pagination;
@@ -47,35 +61,33 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
         const url = `${apiUrl}/${resource}?${stringify(query)}`;
 
         return httpClient(url).then(({ headers, json }) => {
-            if (!headers.has('x-total-count')) {
-                throw new Error(
-                    'The X-Total-Count header is missing in the HTTP Response. The jsonServer Data Provider expects responses for lists of resources to contain this header with the total number of results to build the pagination. If you are using CORS, did you declare X-Total-Count in the Access-Control-Expose-Headers header?'
-                );
-            }
+            const { value } = json;
             return {
-                data: json,
-                total: parseInt(
-                    headers
-                        .get('x-total-count')
-                        .split('/')
-                        .pop(),
-                    10
-                ),
+                data: idFunc(value),
+                total: value.length,
             };
         });
     },
 
     getOne: (resource, params) =>
         httpClient(`${apiUrl}/${resource}/${params.id}`).then(({ json }) => ({
-            data: json,
+            data: idFunc(json),
         })),
 
     getMany: (resource, params) => {
-        const query = {
-            id: params.ids,
-        };
-        const url = `${apiUrl}/${resource}?${stringify(query)}`;
-        return httpClient(url).then(({ json }) => ({ data: json }));
+        const odataFilter = params.ids.reduce((prev: any, val: any) => {
+            if (prev)
+                prev += ' or ';
+
+            if (isNaN(val))
+                val = `'${val}'`;
+            prev += `Id eq ${val}`;
+
+            return prev;
+        }, '');
+
+        const url = `${apiUrl}/${resource}?$filter=${odataFilter}`;
+        return httpClient(url).then(({ json }) => ({ data: idFunc(json.value) }));
     },
 
     getManyReference: (resource, params) => {
@@ -92,29 +104,24 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
         const url = `${apiUrl}/${resource}?${stringify(query)}`;
 
         return httpClient(url).then(({ headers, json }) => {
-            if (!headers.has('x-total-count')) {
-                throw new Error(
-                    'The X-Total-Count header is missing in the HTTP Response. The jsonServer Data Provider expects responses for lists of resources to contain this header with the total number of results to build the pagination. If you are using CORS, did you declare X-Total-Count in the Access-Control-Expose-Headers header?'
-                );
-            }
+            const { value } = json;
             return {
-                data: json,
-                total: parseInt(
-                    headers
-                        .get('x-total-count')
-                        .split('/')
-                        .pop(),
-                    10
-                ),
+                data: idFunc(value),
+                total: value.length,
             };
         });
     },
 
-    update: (resource, params) =>
-        httpClient(`${apiUrl}/${resource}/${params.id}`, {
+    update: (resource, params) => {
+        // delete "id" from payload, because odata does not like this
+        delete params.data.id;
+        
+        return httpClient(`${apiUrl}/${resource}/${params.id}`, {
             method: 'PUT',
             body: JSON.stringify(params.data),
-        }).then(({ json }) => ({ data: json })),
+        // unfortunately odata doesn't give us a response payload here
+        }).then(({ json }) => ({ data: idFunc(params.data) }))
+    },
 
     // json-server doesn't handle filters on UPDATE route, so we fallback to calling UPDATE n times instead
     updateMany: (resource, params) =>
@@ -124,21 +131,22 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
                     method: 'PUT',
                     body: JSON.stringify(params.data),
                 })
-            )
-        ).then(responses => ({ data: responses.map(({ json }) => json.id) })),
+                )
+        // odata needs "id" as uppercase property
+        ).then(responses => ({ data: responses.map(({ json }) => json.Id )})),
 
     create: (resource, params) =>
         httpClient(`${apiUrl}/${resource}`, {
             method: 'POST',
             body: JSON.stringify(params.data),
         }).then(({ json }) => ({
-            data: { ...params.data, id: json.id },
+            data: idFunc(json),
         })),
 
     delete: (resource, params) =>
         httpClient(`${apiUrl}/${resource}/${params.id}`, {
             method: 'DELETE',
-        }).then(({ json }) => ({ data: json })),
+        }).then(({ json }) => ({ data: idFunc(json) })),
 
     // json-server doesn't handle filters on DELETE route, so we fallback to calling DELETE n times instead
     deleteMany: (resource, params) =>
@@ -148,5 +156,6 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
                     method: 'DELETE',
                 })
             )
-        ).then(responses => ({ data: responses.map(({ json }) => json.id) })),
+        // odata needs "id" as uppercase property
+        ).then(responses => ({ data: responses.map(({ json }) => json.Id) })),
 });
