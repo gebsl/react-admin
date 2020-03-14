@@ -34,17 +34,36 @@ import { fetchUtils, DataProvider } from 'ra-core';
  * export default App;
  */
 
- // Id function is necessary, as React Admin always expects a property named "id"
- function idFuncSingle(json: any) {
+// Id function is necessary, as React Admin always expects a property named "id"
+function idFuncSingle(json: any) {
     json.id = json.Id;
     return json;
- }
+}
 
 function idFunc(json: any) {
-    if (Array.isArray(json))
-        return json.map((item) => idFuncSingle(item));
-    else
-        return idFuncSingle(json);
+    if (Array.isArray(json)) return json.map(item => idFuncSingle(item));
+    else return idFuncSingle(json);
+}
+
+function getOdataFilter(filterObj: any) {
+    let filterString = '';
+
+    for (const filterKey in filterObj) {
+        let value = filterObj[filterKey];
+        if (!Array.isArray(value)) value = [value];
+        else value = value.sort();
+
+        filterString = value.reduce((prev: any, val: any) => {
+            if (prev) prev += ' or ';
+
+            if (isNaN(val)) val = `'${val}'`;
+            prev += `${filterKey} eq ${val}`;
+
+            return prev;
+        }, filterString);
+    }
+
+    return `$filter=${filterString}`;
 }
 
 export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
@@ -75,33 +94,33 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
         })),
 
     getMany: (resource, params) => {
-        const odataFilter = params.ids.reduce((prev: any, val: any) => {
-            if (prev)
-                prev += ' or ';
+        const filterObj = {
+            Id: params.ids,
+        };
+        const odataFilter = getOdataFilter(filterObj);
 
-            if (isNaN(val))
-                val = `'${val}'`;
-            prev += `Id eq ${val}`;
-
-            return prev;
-        }, '');
-
-        const url = `${apiUrl}/${resource}?$filter=${odataFilter}`;
-        return httpClient(url).then(({ json }) => ({ data: idFunc(json.value) }));
+        const url = `${apiUrl}/${resource}?${odataFilter}`;
+        return httpClient(url).then(({ json }) => ({
+            data: idFunc(json.value),
+        }));
     },
 
     getManyReference: (resource, params) => {
-        const { page, perPage } = params.pagination;
-        const { field, order } = params.sort;
-        const query = {
-            ...fetchUtils.flattenObject(params.filter),
-            [params.target]: params.id,
-            _sort: field,
-            _order: order,
-            _start: (page - 1) * perPage,
-            _end: page * perPage,
-        };
-        const url = `${apiUrl}/${resource}?${stringify(query)}`;
+        // const { page, perPage } = params.pagination;
+        // const { field, order } = params.sort;
+        // const query = {
+        //     ...fetchUtils.flattenObject(params.filter),
+        //     [params.target]: params.id,
+        //     _sort: field,
+        //     _order: order,
+        //     _start: (page - 1) * perPage,
+        //     _end: page * perPage,
+        // };
+        const filterObj = {};
+        const { target, id } = params;
+        filterObj[target] = id;
+
+        const url = `${apiUrl}/${resource}?${getOdataFilter(filterObj)}`;
 
         return httpClient(url).then(({ headers, json }) => {
             const { value } = json;
@@ -115,12 +134,12 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
     update: (resource, params) => {
         // delete "id" from payload, because odata does not like this
         delete params.data.id;
-        
+
         return httpClient(`${apiUrl}/${resource}/${params.id}`, {
             method: 'PUT',
             body: JSON.stringify(params.data),
-        // unfortunately odata doesn't give us a response payload here
-        }).then(({ json }) => ({ data: idFunc(params.data) }))
+            // unfortunately odata doesn't give us a response payload here
+        }).then(({ json }) => ({ data: idFunc(params.data) }));
     },
 
     // json-server doesn't handle filters on UPDATE route, so we fallback to calling UPDATE n times instead
@@ -131,9 +150,9 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
                     method: 'PUT',
                     body: JSON.stringify(params.data),
                 })
-                )
-        // odata needs "id" as uppercase property
-        ).then(responses => ({ data: responses.map(({ json }) => json.Id )})),
+            )
+            // odata needs "id" as uppercase property
+        ).then(responses => ({ data: responses.map(({ json }) => json.Id) })),
 
     create: (resource, params) =>
         httpClient(`${apiUrl}/${resource}`, {
@@ -146,7 +165,7 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
     delete: (resource, params) =>
         httpClient(`${apiUrl}/${resource}/${params.id}`, {
             method: 'DELETE',
-        }).then(({ json }) => ({ data: idFunc(json) })),
+        }).then(() => ({ data: idFunc(params) })),
 
     // json-server doesn't handle filters on DELETE route, so we fallback to calling DELETE n times instead
     deleteMany: (resource, params) =>
@@ -156,6 +175,7 @@ export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
                     method: 'DELETE',
                 })
             )
-        // odata needs "id" as uppercase property
-        ).then(responses => ({ data: responses.map(({ json }) => json.Id) })),
+            // odata needs "id" as uppercase property
+            // odata service doesn't deliver deleted items, therefore we assume all of them werde deleted
+        ).then(() => ({ data: idFunc(params.ids) })),
 });
