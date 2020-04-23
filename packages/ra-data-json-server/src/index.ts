@@ -53,14 +53,20 @@ function getOdataFilter(filterObj: any) {
         if (!Array.isArray(value)) value = [value];
         else value = value.sort();
 
-        filterString = value.reduce((prev: any, val: any) => {
-            if (prev) prev += ' or ';
+        if (filterString) filterString += ' or ';
 
-            if (isNaN(val)) val = `'${val}'`;
-            prev += `${filterKey} eq ${val}`;
+        filterString += `${filterKey} in (${value
+            .map(val => (isNaN(val) ? `'${val}'` : val))
+            .join(', ')})`;
 
-            return prev;
-        }, filterString);
+        // filterString = value.reduce((prev: any, val: any) => {
+        //     if (prev) prev += ' or ';
+
+        //     if (isNaN(val)) val = `'${val}'`;
+        //     prev += `${filterKey} eq ${val}`;
+
+        //     return prev;
+        // }, filterString);
     }
 
     return `$filter=${filterString}`;
