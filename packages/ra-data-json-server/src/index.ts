@@ -72,23 +72,41 @@ function getOdataFilter(filterObj: any) {
     return `$filter=${filterString}`;
 }
 
+function sort<T>(arr: Array<T>, propFunc: (x: T) => any, desc = false) {
+    return arr.sort((x, y) => {
+        x = propFunc(x);
+        y = propFunc(y);
+
+        let res = 0;
+
+        if (x > y) res = 1;
+        if (x < y) res = -1;
+        if (desc) res *= -1;
+
+        return res;
+    });
+}
+
 export default (apiUrl, httpClient = fetchUtils.fetchJson): DataProvider => ({
     getList: (resource, params) => {
-        const { page, perPage } = params.pagination;
-        const { field, order } = params.sort;
+        // const { page, perPage } = params.pagination;
+        let { field, order } = params.sort;
+        if (!field || field === 'id') field = 'Name';
+
         const query = {
             ...fetchUtils.flattenObject(params.filter),
-            _sort: field,
-            _order: order,
-            _start: (page - 1) * perPage,
-            _end: page * perPage,
+            // _sort: field,
+            // _order: order,
+            // _start: (page - 1) * perPage,
+            // _end: page * perPage,
         };
         const url = `${apiUrl}/${resource}?${stringify(query)}`;
 
         return httpClient(url).then(({ headers, json }) => {
             const { value } = json;
+
             return {
-                data: idFunc(value),
+                data: idFunc(sort(value, x => x[field], order === 'DESC')),
                 total: value.length,
             };
         });
